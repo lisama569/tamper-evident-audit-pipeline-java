@@ -37,3 +37,6 @@ build/
 
 ### Mac OS ###
 .DS_Store
+### 审计流水线本地数据 ###
+/data/
+/data-*/
