@@ -2,6 +2,7 @@ package com.github.lisama569.tamperevidentauditpipelinejava.web;
 
 import java.util.LinkedHashMap;
 import java.util.Map;
+import com.github.lisama569.tamperevidentauditpipelinejava.compliance.DuplicatePurgeRequestException;
 import com.github.lisama569.tamperevidentauditpipelinejava.ledger.TamperException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -47,6 +48,16 @@ public class GlobalExceptionHandler {
         body.put("firstTamperedSequence", e.getFirstTamperedSequence());
         body.put("detail", e.getMessage());
         return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE).body(body);
+    }
+
+    /** 同一 requestId 被用于不同清除请求体：幂等键冲突，明确拒绝（409）。 */
+    @ExceptionHandler(DuplicatePurgeRequestException.class)
+    public ResponseEntity<Map<String, Object>> duplicatePurge(DuplicatePurgeRequestException e) {
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("reason", "DUPLICATE_REQUEST_ID_CONFLICT");
+        body.put("requestId", e.requestId());
+        body.put("detail", e.getMessage());
+        return ResponseEntity.status(HttpStatus.CONFLICT).body(body);
     }
 
     private static String rootMessage(Throwable t) {

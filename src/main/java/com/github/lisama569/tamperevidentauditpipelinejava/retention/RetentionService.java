@@ -3,6 +3,7 @@ package com.github.lisama569.tamperevidentauditpipelinejava.retention;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.github.lisama569.tamperevidentauditpipelinejava.ledger.AppendOnlyLedger;
+import com.github.lisama569.tamperevidentauditpipelinejava.ledger.PurgeMark;
 import com.github.lisama569.tamperevidentauditpipelinejava.ledger.StoredEvent;
 
 import java.nio.file.Path;
@@ -52,6 +53,12 @@ public class RetentionService {
      * 等于 cutoff（恰好在边界上）的记录保留，避免临界时刻结论反复。
      */
     public PurgeResult enforceNow() {
+        if (ledger.isClosed()) {
+            throw new com.github.lisama569.tamperevidentauditpipelinejava.ledger.TamperException(
+                    ledger.firstTamperedSequence(),
+                    "账本已因破坏关闭(最早受影响序号=" + ledger.firstTamperedSequence()
+                            + ")，拒绝执行到期清除");
+        }
         long evaluatedAt = System.currentTimeMillis();
         long cutoff = evaluatedAt - Duration.ofDays(retentionDays).toMillis();
 
@@ -76,7 +83,8 @@ public class RetentionService {
             }
             // 3) 到期判定
             if (decisionTime < cutoff) {
-                ledger.markPurged(e.sequence());
+                ledger.markPurged(e.sequence(), PurgeMark.SOURCE_RETENTION, null,
+                        "保留到期清除 days=" + retentionDays);
                 purged.add(e.sequence());
             } else {
                 kept.add(e.sequence());
