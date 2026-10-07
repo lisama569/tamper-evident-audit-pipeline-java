@@ -101,7 +101,12 @@ public class LegalHoldService {
         return false;
     }
 
-    private static String extractSubject(String payloadJson) {
+    static String extractSubject(String payloadJson) {
+        return subjectOf(payloadJson);
+    }
+
+    /** 从归一化载荷中提取 subject（供保留/合规清除共用，保证匹配口径一致）。 */
+    public static String subjectOf(String payloadJson) {
         try {
             JsonNode n = MAPPER.readTree(payloadJson);
             JsonNode s = n.get("subject");

@@ -3,6 +3,10 @@ package com.github.lisama569.tamperevidentauditpipelinejava.service;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.github.lisama569.tamperevidentauditpipelinejava.config.PipelineProperties;
+import com.github.lisama569.tamperevidentauditpipelinejava.compliance.CompliancePurgeRequest;
+import com.github.lisama569.tamperevidentauditpipelinejava.compliance.CompliancePurgeResult;
+import com.github.lisama569.tamperevidentauditpipelinejava.compliance.CompliancePurgeService;
+import com.github.lisama569.tamperevidentauditpipelinejava.compliance.DuplicatePurgeRequestException;
 import com.github.lisama569.tamperevidentauditpipelinejava.forward.HttpForwarder;
 import com.github.lisama569.tamperevidentauditpipelinejava.forward.OutboxEntry;
 import com.github.lisama569.tamperevidentauditpipelinejava.forward.OutboxStore;
@@ -49,6 +53,7 @@ public class AuditPipelineService {
     private final OutboxStore outbox;
     private final LegalHoldService holds;
     private final RetentionService retention;
+    private final CompliancePurgeService compliancePurges;
     private final RetryDispatcher dispatcher;
 
     public AuditPipelineService(PipelineProperties props, ObjectMapper mapper) {
@@ -66,6 +71,7 @@ public class AuditPipelineService {
         this.holds = new LegalHoldService(dir.resolve("holds.log"));
         this.retention = new RetentionService(ledger, holds, props.getRetentionDays(),
                 dir.resolve("keys"));
+        this.compliancePurges = new CompliancePurgeService(ledger, holds, dir);
         HttpForwarder forwarder = new HttpForwarder(props.getForwardUrl(),
                 HttpClient.newHttpClient(), props.getForwardTimeoutMs());
         this.dispatcher = new RetryDispatcher(outbox, forwarder, props.getRetryMaxAttempts(),
@@ -145,6 +151,38 @@ public class AuditPipelineService {
         return h;
     }
 
+    /** 合规清除预演：不改动留存，返回每条命中记录的结论与依据。 */
+    public CompliancePurgeResult previewCompliancePurge(CompliancePurgeRequest request) {
+        CompliancePurgeResult result = compliancePurges.preview(request);
+        LOG.info(() -> "[COMPLIANCE-PREVIEW] requestId=" + request.requestId()
+                + " 选择器=" + result.selector() + " 将清=" + result.purgedSequences()
+                + " 被法律保留挡下=" + result.blockedByLegalHold() + " 已清过=" + result.alreadyPurged()
+                + " 幂等重放=" + result.idempotentReplay());
+        return result;
+    }
+
+    /** 合规清除执行：同 requestId 幂等（含重启），返回与首次一致且每条可解释的结论。 */
+    public CompliancePurgeResult executeCompliancePurge(CompliancePurgeRequest request) {
+        if (ledger.isClosed()) {
+            throw new TamperException(ledger.firstTamperedSequence(),
+                    "账本已因篡改关闭，最早受影响序号=" + ledger.firstTamperedSequence()
+                            + "，拒绝执行合规清除请求 " + request.requestId());
+        }
+        CompliancePurgeResult result;
+        try {
+            result = compliancePurges.execute(request);
+        } catch (DuplicatePurgeRequestException d) {
+            throw d;
+        } catch (TamperException t) {
+            throw t;
+        }
+        LOG.info(() -> "[COMPLIANCE-EXECUTE] requestId=" + request.requestId()
+                + " 原因=" + request.reason() + " 选择器=" + result.selector()
+                + " 已清=" + result.purgedSequences() + " 被挡=" + result.blockedByLegalHold()
+                + " 幂等重放=" + result.idempotentReplay());
+        return result;
+    }
+
     public boolean removeLegalHold(String holdId) {
         boolean removed = holds.removeHold(holdId);
         LOG.info(() -> "[HOLD] 移除法律保留 holdId=" + holdId + " 结果=" + removed);
@@ -165,6 +203,29 @@ public class AuditPipelineService {
 
     public LegalHoldService legalHolds() {
         return holds;
+    }
+
+    public CompliancePurgeService compliancePurges() {
+        return compliancePurges;
+    }
+
+    /** 全量完整性核验（结论完全由磁盘内容+签名锚点重算，重启一致）。 */
+    public com.github.lisama569.tamperevidentauditpipelinejava.ledger.VerifyResult verifyLedger() {
+        com.github.lisama569.tamperevidentauditpipelinejava.ledger.VerifyResult r = ledger.verifyFull();
+        LOG.info(() -> "[VERIFY] 全量核验 healthy=" + r.healthy()
+                + " 最早受影响序号=" + r.firstTamperedSequence() + " 证据=" + r.evidence()
+                + " 范围=[" + r.fromSequence() + "," + r.toSequence() + "] 帧数=" + r.framesExamined()
+                + " 依据=" + r.detail());
+        return r;
+    }
+
+    /** 分段核验：只重算 [fromSequence,toSequence]，结论与全量核验一致并带明确范围。 */
+    public com.github.lisama569.tamperevidentauditpipelinejava.ledger.VerifyResult verifyLedgerRange(long from, long to) {
+        com.github.lisama569.tamperevidentauditpipelinejava.ledger.VerifyResult r = ledger.verifyRange(from, to);
+        LOG.info(() -> "[VERIFY] 分段核验 [" + from + "," + to + "] healthy=" + r.healthy()
+                + " 最早受影响序号=" + r.firstTamperedSequence() + " 证据=" + r.evidence()
+                + " 帧数=" + r.framesExamined() + " 依据=" + r.detail());
+        return r;
     }
 
     public RetryDispatcher dispatcher() {

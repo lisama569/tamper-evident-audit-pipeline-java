@@ -4,7 +4,6 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.github.lisama569.tamperevidentauditpipelinejava.ledger.AppendOnlyLedger;
 import com.github.lisama569.tamperevidentauditpipelinejava.ledger.StoredEvent;
-
 import java.nio.file.Path;
 import java.time.Duration;
 import java.time.Instant;
@@ -76,7 +75,7 @@ public class RetentionService {
             }
             // 3) 到期判定
             if (decisionTime < cutoff) {
-                ledger.markPurged(e.sequence());
+                ledger.markPurged(e.sequence(), PurgeSource.EXPIRY, null, "RETENTION");
                 purged.add(e.sequence());
             } else {
                 kept.add(e.sequence());

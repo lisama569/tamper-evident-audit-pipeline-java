@@ -2,6 +2,7 @@ package com.github.lisama569.tamperevidentauditpipelinejava.web;
 
 import java.util.LinkedHashMap;
 import java.util.Map;
+import com.github.lisama569.tamperevidentauditpipelinejava.compliance.DuplicatePurgeRequestException;
 import com.github.lisama569.tamperevidentauditpipelinejava.ledger.TamperException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -34,6 +35,26 @@ public class GlobalExceptionHandler {
         body.put("reason", "MISSING_REQUIRED_FIELD");
         body.put("detail", e.getMessage());
         return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(body);
+    }
+
+    /** 同一合规清除 requestId 以不同参数重复提交：幂等冲突，明确拒绝（HTTP 409）。 */
+    @ExceptionHandler(DuplicatePurgeRequestException.class)
+    public ResponseEntity<Map<String, Object>> purgeConflict(DuplicatePurgeRequestException e) {
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("accepted", false);
+        body.put("reason", "COMPLIANCE_REQUEST_CONFLICT");
+        body.put("detail", e.getMessage());
+        return ResponseEntity.status(HttpStatus.CONFLICT).body(body);
+    }
+
+    /** 分段核验缺少签名检查点等：422，提示明确的兼容/操作结论，不静默降级。 */
+    @ExceptionHandler(IllegalStateException.class)
+    public ResponseEntity<Map<String, Object>> illegalState(IllegalStateException e) {
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("accepted", false);
+        body.put("reason", "ILLEGAL_STATE");
+        body.put("detail", e.getMessage());
+        return ResponseEntity.status(HttpStatus.UNPROCESSABLE_ENTITY).body(body);
     }
 
     @ExceptionHandler(TamperException.class)

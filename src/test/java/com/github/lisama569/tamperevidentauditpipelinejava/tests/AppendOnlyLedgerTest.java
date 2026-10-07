@@ -107,12 +107,12 @@ class AppendOnlyLedgerTest {
         l1.append("k2", "p2", 2L);
         Path f = ledgerFile();
         List<String> lines = Files.readAllLines(f);
-        // 删除第 1 条
+        // 删除第 1 条：链断裂且第一个数据序号空缺为 1（“最早受影响/第一个空缺位置”语义）
         Files.write(f, List.of(lines.get(1)));
         TamperException ex = assertThrows(TamperException.class, () -> new AppendOnlyLedger(f));
-        assertEquals(2L, ex.getFirstTamperedSequence());
+        assertEquals(1L, ex.getFirstTamperedSequence());
         LOG.info(() -> "[CASE " + info.getDisplayName() + "] 输入=删除第1条 判定依据=" + ex.getMessage()
-                + " 最终状态=删除可检测");
+                + " 最终状态=删除可检测，最早受影响/第一个空缺序号=1");
     }
 
     @Test
